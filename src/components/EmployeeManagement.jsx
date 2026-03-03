@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Plus, PencilSimple, Trash, Check, X } from '@phosphor-icons/react';
 import { mockEmployees, mockDepartments } from '../data/mockData';
 import { db } from '../firebase';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 
 export default function EmployeeManagement() {
     const [employees, setEmployees] = useState([]);
     const [isEditing, setIsEditing] = useState(false);
     const [currentEmployee, setCurrentEmployee] = useState({ id: null, name: '', title: '', deptId: 1 });
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
 
     const employeesCollection = collection(db, 'employees');
 
@@ -18,7 +19,9 @@ export default function EmployeeManagement() {
 
     const fetchEmployees = async () => {
         setLoading(true);
+        setError(null);
         try {
+            console.log("Attempting to fetch employees from Firestore...");
             const querySnapshot = await getDocs(employeesCollection);
             const employeeList = querySnapshot.docs.map(doc => ({
                 firebaseId: doc.id,
@@ -26,16 +29,24 @@ export default function EmployeeManagement() {
             }));
 
             if (employeeList.length === 0) {
+                console.log("No employees found. Seeding database with mock data...");
                 // First time setup: Upload mock data to Firebase
                 for (const emp of mockEmployees) {
                     await addDoc(employeesCollection, emp);
                 }
-                fetchEmployees(); // Re-fetch after upload
+                // Re-fetch once after upload
+                const secondSnapshot = await getDocs(employeesCollection);
+                const finalSyncList = secondSnapshot.docs.map(doc => ({
+                    firebaseId: doc.id,
+                    ...doc.data()
+                }));
+                setEmployees(finalSyncList.sort((a, b) => a.id - b.id));
             } else {
                 setEmployees(employeeList.sort((a, b) => a.id - b.id));
             }
-        } catch (error) {
-            console.error("Error fetching employees: ", error);
+        } catch (err) {
+            console.error("Firestore Error: ", err);
+            setError(err.message);
         }
         setLoading(false);
     };
@@ -50,8 +61,9 @@ export default function EmployeeManagement() {
             try {
                 await deleteDoc(doc(db, 'employees', firebaseId));
                 fetchEmployees();
-            } catch (error) {
-                console.error("Error deleting employee: ", error);
+            } catch (err) {
+                console.error("Error deleting employee: ", err);
+                alert("เกิดข้อผิดพลาดในการลบ: " + err.message);
             }
         }
     };
@@ -70,8 +82,9 @@ export default function EmployeeManagement() {
             }
             resetForm();
             fetchEmployees();
-        } catch (error) {
-            console.error("Error saving employee: ", error);
+        } catch (err) {
+            console.error("Error saving employee: ", err);
+            alert("เกิดข้อผิดพลาดในการบันทึก: " + err.message);
         }
     };
 
@@ -85,7 +98,25 @@ export default function EmployeeManagement() {
         return dept ? dept.name : 'ไม่ระบุ';
     };
 
-    if (loading) return <div style={{ padding: '2rem', textAlign: 'center' }}>กำลังโหลดข้อมูลพนักงาน...</div>;
+    if (loading) return (
+        <div style={{ padding: '4rem', textAlign: 'center' }}>
+            <div style={{ color: 'var(--color-primary)', fontSize: '1.2rem', fontWeight: 600 }}>
+                กำลังเชื่อมต่อฐานข้อมูล Cloud...
+            </div>
+            <p style={{ color: 'var(--color-text-muted)', marginTop: '1rem' }}>หากค้างนานเกิน 10 วินาที กรุณาตรวจสอบว่าเปิดใช้งาน Firestore ใน Firebase Console หรือยัง</p>
+        </div>
+    );
+
+    if (error) return (
+        <div className="card" style={{ margin: '2rem', border: '1px solid var(--color-danger)', backgroundColor: '#fff5f5' }}>
+            <h3 style={{ color: 'var(--color-danger)' }}>เกิดข้อผิดพลาดในการโหลดข้อมูล</h3>
+            <p style={{ marginTop: '0.5rem', color: '#852626' }}>{error}</p>
+            <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
+                โปรดตรวจสอบว่าคุณได้สร้าง "Firestore Database" และเลือก "Test Mode" ในหน้า Firebase Console แล้ว
+            </p>
+            <button className="btn btn-secondary" style={{ marginTop: '1rem' }} onClick={fetchEmployees}>ลองใหม่อีกครั้ง</button>
+        </div>
+    );
 
     return (
         <div className="animate-fade-in">
