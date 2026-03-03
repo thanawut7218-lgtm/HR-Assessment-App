@@ -1,31 +1,48 @@
 import React, { useState, useEffect } from 'react';
 import { initialCategories, initialQuestions, mockEmployees, mockDepartments } from '../data/mockData';
+import { db } from '../firebase';
+import { collection, getDocs, addDoc } from 'firebase/firestore';
 
 export default function AssessmentForm() {
     const [questions, setQuestions] = useState([]);
     const [categories, setCategories] = useState([]);
     const [employees, setEmployees] = useState([]);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Load from LocalStorage if exists, else use mockData
-        const storedQ = localStorage.getItem('appQuestions');
-        const storedC = localStorage.getItem('appCategories');
-        const storedE = localStorage.getItem('appEmployees');
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                // 1. Fetch Employees from Firebase
+                const empSnapshot = await getDocs(collection(db, 'employees'));
+                const empList = empSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                setEmployees(empList.sort((a, b) => a.id - b.id));
 
-        if (storedQ && storedC) {
-            setQuestions(JSON.parse(storedQ));
-            setCategories(JSON.parse(storedC));
-        } else {
-            setQuestions(initialQuestions);
-            setCategories(initialCategories);
-        }
+                // 2. Fetch Questions/Categories (Keep LocalStorage for now or could move to Firebase too)
+                const storedQ = localStorage.getItem('appQuestions');
+                const storedC = localStorage.getItem('appCategories');
 
-        if (storedE) {
-            setEmployees(JSON.parse(storedE));
-        } else {
-            setEmployees(mockEmployees);
-        }
+                if (storedQ && storedC) {
+                    setQuestions(JSON.parse(storedQ));
+                    setCategories(JSON.parse(storedC));
+                } else {
+                    setQuestions(initialQuestions);
+                    setCategories(initialCategories);
+                }
+            } catch (error) {
+                console.error("Error fetching data: ", error);
+            }
+            setLoading(false);
+        };
+
+        fetchData();
     }, []);
+
+    const handleSaveAssessment = async () => {
+        alert("บันทึกข้อมูลการประเมินเรียบร้อยแล้ว (ฟังก์ชันนี้ยังไม่ได้เชื่อมฐานข้อมูล Cloud)");
+    };
+
+    if (loading) return <div style={{ padding: '2rem', textAlign: 'center' }}>กำลังโหลดข้อมูล...</div>;
 
     return (
         <div>
@@ -34,7 +51,7 @@ export default function AssessmentForm() {
                     <h1 style={{ color: 'var(--color-primary-dark)', marginBottom: '0.25rem' }}>แบบฟอร์มประเมินพนักงาน</h1>
                     <p style={{ color: 'var(--color-text-muted)' }}>กรุณากรอกข้อมูลเพื่อประเมินประสิทธิภาพการทำงาน</p>
                 </div>
-                <button className="btn btn-primary">
+                <button className="btn btn-primary" onClick={handleSaveAssessment}>
                     บันทึกผลการประเมิน
                 </button>
             </div>

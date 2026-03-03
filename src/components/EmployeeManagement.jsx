@@ -1,25 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, PencilSimple, Trash, Check, X } from '@phosphor-icons/react';
 import { mockEmployees, mockDepartments } from '../data/mockData';
+import { db } from '../firebase';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 
 export default function EmployeeManagement() {
     const [employees, setEmployees] = useState([]);
     const [isEditing, setIsEditing] = useState(false);
     const [currentEmployee, setCurrentEmployee] = useState({ id: null, name: '', title: '', deptId: 1 });
+    const [loading, setLoading] = useState(true);
+
+    const employeesCollection = collection(db, 'employees');
 
     useEffect(() => {
-        const stored = localStorage.getItem('appEmployees');
-        if (stored) {
-            setEmployees(JSON.parse(stored));
-        } else {
-            setEmployees(mockEmployees);
-            localStorage.setItem('appEmployees', JSON.stringify(mockEmployees));
-        }
+        fetchEmployees();
     }, []);
 
-    const saveToStorage = (updatedList) => {
-        setEmployees(updatedList);
-        localStorage.setItem('appEmployees', JSON.stringify(updatedList));
+    const fetchEmployees = async () => {
+        setLoading(true);
+        try {
+            const querySnapshot = await getDocs(employeesCollection);
+            const employeeList = querySnapshot.docs.map(doc => ({
+                firebaseId: doc.id,
+                ...doc.data()
+            }));
+
+            if (employeeList.length === 0) {
+                // First time setup: Upload mock data to Firebase
+                for (const emp of mockEmployees) {
+                    await addDoc(employeesCollection, emp);
+                }
+                fetchEmployees(); // Re-fetch after upload
+            } else {
+                setEmployees(employeeList.sort((a, b) => a.id - b.id));
+            }
+        } catch (error) {
+            console.error("Error fetching employees: ", error);
+        }
+        setLoading(false);
     };
 
     const handleEdit = (emp) => {
@@ -27,24 +45,34 @@ export default function EmployeeManagement() {
         setIsEditing(true);
     };
 
-    const handleDelete = (id) => {
+    const handleDelete = async (firebaseId) => {
         if (window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบข้อมูลพนักงานท่านนี้?')) {
-            const updated = employees.filter(emp => emp.id !== id);
-            saveToStorage(updated);
+            try {
+                await deleteDoc(doc(db, 'employees', firebaseId));
+                fetchEmployees();
+            } catch (error) {
+                console.error("Error deleting employee: ", error);
+            }
         }
     };
 
-    const handleSave = (e) => {
+    const handleSave = async (e) => {
         e.preventDefault();
-        let updated;
-        if (currentEmployee.id) {
-            updated = employees.map(emp => emp.id === currentEmployee.id ? currentEmployee : emp);
-        } else {
-            const newId = employees.length > 0 ? Math.max(...employees.map(e => e.id)) + 1 : 1;
-            updated = [...employees, { ...currentEmployee, id: newId }];
+        try {
+            if (currentEmployee.firebaseId) {
+                // Update existing
+                const { firebaseId, ...data } = currentEmployee;
+                await updateDoc(doc(db, 'employees', firebaseId), data);
+            } else {
+                // Add new
+                const nextId = employees.length > 0 ? Math.max(...employees.map(e => e.id)) + 1 : 1;
+                await addDoc(employeesCollection, { ...currentEmployee, id: nextId });
+            }
+            resetForm();
+            fetchEmployees();
+        } catch (error) {
+            console.error("Error saving employee: ", error);
         }
-        saveToStorage(updated);
-        resetForm();
     };
 
     const resetForm = () => {
@@ -57,12 +85,14 @@ export default function EmployeeManagement() {
         return dept ? dept.name : 'ไม่ระบุ';
     };
 
+    if (loading) return <div style={{ padding: '2rem', textAlign: 'center' }}>กำลังโหลดข้อมูลพนักงาน...</div>;
+
     return (
         <div className="animate-fade-in">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
                 <div>
-                    <h1 style={{ color: 'var(--color-primary-dark)', marginBottom: '0.25rem' }}>จัดการข้อมูลพนักงาน</h1>
-                    <p style={{ color: 'var(--color-text-muted)' }}>เพิ่ม แก้ไข หรือลบข้อมูลพนักงานในระบบ</p>
+                    <h1 style={{ color: 'var(--color-primary-dark)', marginBottom: '0.25rem' }}>จัดการข้อมูลพนักงาน (Cloud)</h1>
+                    <p style={{ color: 'var(--color-text-muted)' }}>พนักงานทุกคนจะเห็นข้อมูลชุดเดียวกันแบบ Real-time</p>
                 </div>
                 {!isEditing && (
                     <button className="btn btn-primary" onClick={() => setIsEditing(true)}>
@@ -73,7 +103,7 @@ export default function EmployeeManagement() {
 
             {isEditing && (
                 <div className="card" style={{ marginBottom: '2rem', borderLeft: '4px solid var(--color-primary)' }}>
-                    <h3 style={{ marginBottom: '1.5rem' }}>{currentEmployee.id ? 'แก้ไขข้อมูลพนักงาน' : 'เพิ่มพนักงานใหม่'}</h3>
+                    <h3 style={{ marginBottom: '1.5rem' }}>{currentEmployee.firebaseId ? 'แก้ไขข้อมูลพนักงาน' : 'เพิ่มพนักงานใหม่'}</h3>
                     <form onSubmit={handleSave} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>
                         <div className="form-group">
                             <label className="form-label">ชื่อ-นามสกุล</label>
@@ -114,7 +144,7 @@ export default function EmployeeManagement() {
                                 <X size={18} /> ยกเลิก
                             </button>
                             <button type="submit" className="btn btn-primary">
-                                <Check size={18} /> {currentEmployee.id ? 'บันทึกการแก้ไข' : 'ยืนยันเพิ่มพนักงาน'}
+                                <Check size={18} /> {currentEmployee.firebaseId ? 'บันทึกการแก้ไข' : 'ยืนยันเพิ่มพนักงาน'}
                             </button>
                         </div>
                     </form>
@@ -134,7 +164,7 @@ export default function EmployeeManagement() {
                     </thead>
                     <tbody>
                         {employees.map((emp) => (
-                            <tr key={emp.id}>
+                            <tr key={emp.firebaseId}>
                                 <td style={{ fontWeight: 600, color: 'var(--color-text-muted)' }}>#{emp.id}</td>
                                 <td style={{ fontWeight: 700 }}>{emp.name}</td>
                                 <td>{emp.title}</td>
@@ -162,7 +192,7 @@ export default function EmployeeManagement() {
                                         <button 
                                             className="btn btn-secondary" 
                                             style={{ padding: '6px 10px', color: 'var(--color-danger)' }}
-                                            onClick={() => handleDelete(emp.id)}
+                                            onClick={() => handleDelete(emp.firebaseId)}
                                         >
                                             <Trash size={18} />
                                         </button>
